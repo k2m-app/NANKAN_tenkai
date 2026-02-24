@@ -874,63 +874,111 @@ def generate_pace_prediction_text(df, current_base):
 
     return f"**【{pace}予想】**\n{reason}{must_lead_text}{alert_text}"
 
-def generate_export_html(r_num, df_scored, formation_str, pace_text):
-    """結果を1枚のHTMLファイルとしてダウンロードできるように成形する"""
-    now_str = datetime.now().strftime("%Y-%m-%d")
+def generate_export_html_multi(races_data):
+    """複数レースの結果を1枚のHTMLファイル（タブ切り替え形式）として成形する"""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    # DataFrameのHTML化 (一部不要列は除く)
-    display_cols = ['horse_name', 'gate_num', 'first_corner', 'first_3f_normalized', 'frame_type', 'running_style']
-    cols_to_show = [c for c in display_cols if c in df_scored.columns]
+    tabs_html = ""
+    content_html = ""
     
-    df_html = df_scored[cols_to_show].to_html(
-        classes='table table-striped table-bordered', 
-        float_format='{:.1f}'.format,
-        index=False,
-        escape=False
-    )
-    
+    for i, race in enumerate(races_data):
+        r_num = race["r_num"]
+        df_scored = race["df_scored"]
+        formation_str = race["formation_str"]
+        pace_text = race["pace_text"]
+        
+        active_class = " active" if i == 0 else ""
+        style_display = "block" if i == 0 else "none"
+        
+        tabs_html += f'<button class="tablink{active_class}" onclick="openTab(event, \'Race{r_num}\')">{r_num}R</button>\n'
+        
+        display_cols = ['horse_name', 'gate_num', 'first_corner', 'first_3f_normalized', 'frame_type', 'running_style']
+        cols_to_show = [c for c in display_cols if c in df_scored.columns]
+        df_html = df_scored[cols_to_show].to_html(
+            classes='table table-striped table-bordered', 
+            float_format='{:.1f}'.format,
+            index=False,
+            escape=False
+        )
+        
+        content_html += f"""
+        <div id="Race{r_num}" class="tabcontent" style="display:{style_display}">
+            <h2>🏇 南関競馬 展開予想レポート - {r_num}R</h2>
+            <h3>🏃‍♂️ 想定されるレース隊列</h3>
+            <div class="formation">{formation_str}</div>
+            
+            <h3>展開解説とペース予想</h3>
+            <div class="pace-text">
+                {pace_text.replace(chr(10), '<br>')}
+            </div>
+            
+            <h3>各馬の詳細データ (直近最大10走)</h3>
+            <div class="table-container">
+                {df_html}
+            </div>
+        </div>
+        """
+        
     html_content = f"""
     <!DOCTYPE html>
     <html lang="ja">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>南関競馬 展開予想 ({r_num}R)</title>
+        <title>南関競馬 展開予想まとめて出力</title>
         <style>
-            body {{ font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; line-height: 1.6; padding: 20px; color: #333; background: #fafafa; }}
-            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-            h1 {{ color: #2c3e50; font-size: 24px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
-            h2 {{ color: #2980b9; font-size: 20px; margin-top: 30px; }}
-            .formation {{ background: #e8f4f8; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 18px; color: #0056b3; letter-spacing: 1px; }}
-            .pace-text {{ background: #fff3e0; padding: 20px; border-left: 5px solid #ff9800; border-radius: 4px; margin: 20px 0; }}
-            .table-container {{ overflow-x: auto; margin-top: 20px; }}
-            table {{ width: 100%; border-collapse: collapse; font-size: 14px; white-space: nowrap; }}
-            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+            body {{ font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; line-height: 1.6; padding: 10px; color: #333; background: #fafafa; margin: 0; }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }}
+            
+            /* タブのスタイル */
+            .tab {{ overflow: hidden; background-color: #2c3e50; display: flex; flex-wrap: wrap; }}
+            .tab button {{ background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; color: white; font-weight: bold; font-size: 16px; flex-grow: 1; }}
+            .tab button:hover {{ background-color: #34495e; }}
+            .tab button.active {{ background-color: #3498db; }}
+            
+            /* タブコンテンツのスタイル */
+            .tabcontent {{ display: none; padding: 20px; border-top: none; animation: fadeEffect 0.5s; }}
+            @keyframes fadeEffect {{ from {{opacity: 0;}} to {{opacity: 1;}} }}
+            
+            h2 {{ color: #2c3e50; font-size: 22px; border-bottom: 2px solid #3498db; padding-bottom: 5px; margin-top: 5px; }}
+            h3 {{ color: #2980b9; font-size: 18px; margin-top: 25px; }}
+            .formation {{ background: #e8f4f8; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 16px; color: #0056b3; letter-spacing: 1px; }}
+            .pace-text {{ background: #fff3e0; padding: 15px; border-left: 5px solid #ff9800; border-radius: 4px; margin: 15px 0; font-size: 15px; }}
+            .table-container {{ overflow-x: auto; margin-top: 15px; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }}
+            th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
             th {{ background-color: #f2f2f2; position: sticky; top: 0; }}
-            .footer {{ margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 12px; }}
+            .footer {{ margin-top: 30px; padding: 15px; text-align: center; color: #7f8c8d; font-size: 12px; background: #f9f9f9; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🏇 南関競馬 展開予想レポート - {r_num}R</h1>
-            
-            <h2>🏃‍♂️ 想定されるレース隊列</h2>
-            <div class="formation">{formation_str}</div>
-            
-            <h2>展開解説とペース予想</h2>
-            <div class="pace-text">
-                {pace_text.replace(chr(10), '<br>')}
+            <div class="tab">
+                {tabs_html}
             </div>
             
-            <h2>各馬の詳細データ (直近最大10走)</h2>
-            <div class="table-container">
-                {df_html}
-            </div>
+            {content_html}
             
             <div class="footer">
                 出力日時: {now_str} (南関展開予想AI)
             </div>
         </div>
+
+        <script>
+        function openTab(evt, raceId) {{
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {{
+                tabcontent[i].style.display = "none";
+            }}
+            tablinks = document.getElementsByClassName("tablink");
+            for (i = 0; i < tablinks.length; i++) {{
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }}
+            document.getElementById(raceId).style.display = "block";
+            evt.currentTarget.className += " active";
+        }}
+        </script>
     </body>
     </html>
     """
@@ -1003,6 +1051,9 @@ def main():
                 else:
                     st.sidebar.warning("ログイン失敗（ゲストとして続行）")
             
+            # まとめて出力するためのデータ保存用リスト
+            all_races_html_data = []
+            
             for r_num in selected_races:
                 if len(selected_races) > 1:
                     st.markdown(f"## 🏁 {r_num}R の予想")
@@ -1045,19 +1096,34 @@ def main():
                 with st.expander(f"{r_num}R 各馬の詳細データ（直近最大10走・内中外枠区分等）"):
                     st.dataframe(df_scored, use_container_width=True)
                 
-                # ダウンロードボタンの追加
-                html_export = generate_export_html(r_num, df_scored, formation_str, pace_text)
-                st.download_button(
-                    label=f"💾 {r_num}R の予想を保存 (スマホ見返し用HTML)",
-                    data=html_export,
-                    file_name=f"南関展開予想_Race{r_num}.html",
-                    mime="text/html",
-                    key=f"dl_btn_{r_num}"
-                )
+                # HTML出力用のデータをストック
+                all_races_html_data.append({
+                    "r_num": r_num,
+                    "df_scored": df_scored,
+                    "formation_str": formation_str,
+                    "pace_text": pace_text
+                })
                     
                 if len(selected_races) > 1:
                     st.divider()
                     time.sleep(random.uniform(0.8, 1.5)) # レース間のインターバル
+            
+            # 全レース終了後、一括出力用ボタンの配置
+            if all_races_html_data:
+                st.markdown("---")
+                html_export_multi = generate_export_html_multi(all_races_html_data)
+                
+                race_names_str = "_".join([str(r["r_num"]) for r in all_races_html_data])
+                filename = f"南関展開予想_{race_names_str}R.html"
+                
+                st.download_button(
+                    label=f"💾 選択した全レース（{len(all_races_html_data)}件）の予想を保存 (スマホ見返し用HTML, タブ切替対応)",
+                    data=html_export_multi,
+                    file_name=filename,
+                    mime="text/html",
+                    key="dl_btn_all",
+                    type="primary"
+                )
                     
             st.success("全ての予想・データ収集が完了しました！")
 
