@@ -5,6 +5,7 @@ import numpy as np
 import re
 import requests
 import time
+import random
 import unicodedata
 from datetime import datetime
 
@@ -17,13 +18,13 @@ from datetime import datetime
 # =====================================================================
 TRACK_DISTANCE_BASE_3F = {
     "浦和": {
-        1200: 36.5, 1300: 37.5, 1400: 38.5, 1500: 39.5, 1600: 40.0, 2000: 41.0,
+        800: 35.0, 1200: 36.5, 1300: 37.5, 1400: 38.5, 1500: 39.5, 1600: 40.0, 2000: 41.0,
     },
     "船橋": {
-        1000: 35.5, 1200: 36.0, 1400: 38.0, 1500: 39.0, 1600: 39.5, 1800: 40.0,
+        1000: 35.5, 1200: 36.0, 1400: 38.0, 1500: 39.0, 1600: 39.5, 1800: 40.0, 2200: 41.5,
     },
     "大井": {
-        1000: 36.0, 1200: 36.5, 1400: 38.5, 1500: 39.5, 1600: 40.0, 1800: 40.5, 2000: 41.5, 2400: 42.5,
+        1000: 36.0, 1200: 36.5, 1400: 38.5, 1500: 39.5, 1600: 40.0, 1650: 40.5, 1800: 40.5, 2000: 41.5, 2400: 42.5,
     },
     "川崎": {
         900: 35.5, 1200: 36.5, 1400: 38.0, 1500: 39.0, 1600: 39.5, 2000: 41.0, 2100: 41.5,
@@ -32,8 +33,8 @@ TRACK_DISTANCE_BASE_3F = {
 
 # 全場の全距離を合算したグローバルデフォルト（該当なし時に使用）
 GLOBAL_DEFAULT_3F = {
-    900: 35.5, 1000: 35.8, 1200: 36.5, 1300: 37.5, 1400: 38.3,
-    1500: 39.3, 1600: 39.8, 1800: 40.3, 2000: 41.2, 2100: 41.5, 2400: 42.5,
+    800: 35.0, 900: 35.5, 1000: 35.8, 1200: 36.5, 1300: 37.5, 1400: 38.3,
+    1500: 39.3, 1600: 39.8, 1650: 40.3, 1800: 40.3, 2000: 41.2, 2100: 41.5, 2200: 42.0, 2400: 42.5,
 }
 
 
@@ -93,8 +94,17 @@ class KeibaBookScraper:
         self.login_id = login_id
         self.password = password
         self.session = requests.Session()
+        
+        # 複数の代表的なUser-Agentを用意し、ランダムに切り替える
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.164 Mobile Safari/537.36"
+        ]
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": random.choice(user_agents)
         })
         self.base_url = "https://s.keibabook.co.jp"
         self.is_logged_in = False
@@ -143,10 +153,27 @@ class KeibaBookScraper:
             st.error(f"ログインエラー: {e}")
             return False
 
+    def request_with_retry(self, url, max_retries=2):
+        """ランダムな遅延を入れてリクエストし、タイムアウト時にはリトライする"""
+        time.sleep(random.uniform(0.15, 0.45))
+        for attempt in range(max_retries):
+            try:
+                res = self.session.get(url, timeout=10)
+                res.raise_for_status()
+                return res
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise e
+                time.sleep(random.uniform(1.0, 2.5))
+        return None
+
     def get_horses_from_syutuba(self, race_url):
         """出馬表URLから各出走馬のURL一覧を取得する"""
-        res = self.session.get(race_url)
-        soup = BeautifulSoup(res.text, "html.parser")
+        try:
+            res = self.request_with_retry(race_url)
+            soup = BeautifulSoup(res.text, "html.parser")
+        except Exception:
+            return []
         horses = []
         gate = 1
         seen_urls = set()
@@ -170,8 +197,11 @@ class KeibaBookScraper:
 
     def get_race_info(self, race_url):
         """出馬表URLから今回のレースの距離と競馬場名を推定する"""
-        res = self.session.get(race_url)
-        soup = BeautifulSoup(res.text, "html.parser")
+        try:
+            res = self.request_with_retry(race_url)
+            soup = BeautifulSoup(res.text, "html.parser")
+        except Exception:
+            return "", np.nan
         
         track_name = ""
         distance = np.nan
@@ -207,8 +237,11 @@ class KeibaBookScraper:
 
     def get_horse_seiseki(self, horse_url):
         """馬の個別ページから過去成績テーブルを全てスクレイピングしてDataFrame化する"""
-        res = self.session.get(horse_url)
-        soup = BeautifulSoup(res.text, "html.parser")
+        try:
+            res = self.request_with_retry(horse_url)
+            soup = BeautifulSoup(res.text, "html.parser")
+        except Exception:
+            return pd.DataFrame()
         seiseki_list = []
         
         for div in soup.find_all("div", class_="uma_seiseki"):
@@ -570,7 +603,9 @@ def get_race_url_from_base(base_url, target_race_num):
     return base_url
 
 
-def run_prediction_for_race(scraper, race_url, target_race_num=None):
+# スクレイピング関数にキャッシュを付与。引数の _scraper はインスタンスなのでハッシュ化を無視する。
+@st.cache_data(ttl=3600, show_spinner=False)
+def run_prediction_for_race(_scraper, race_url, target_race_num=None):
     """1レース分のデータ収集と予想実行処理を関数化"""
     try:
         # 1. 今回のレース情報を取得（競馬場名・距離）
@@ -829,15 +864,77 @@ def generate_pace_prediction_text(df, current_base):
     # スローペースや逃げ馬不在の時に、過去に人気薄で逃げ残りした馬をピックアップ
     if 'is_alert_runner' in temp_df.columns:
         alert_horses = temp_df[temp_df['is_alert_runner'] == True]
-        for _, row in alert_horses.iterrows():
-            gate = int(row['gate_num'])
-            horse_c = circle_nums.get(gate, f"({gate})")
-            reason_str = row.get('alert_reason', '')
-            # 普段は後ろにいる馬がしれっと逃げたケースなどへの警戒
-            alert_text += f"\n\n🚨大穴・逃げ警戒: {horse_c}は{reason_str}。前に行く馬の手薄な構成なら、ノーマークの単騎逃げで波乱を演出する可能性があります。"
+        if not alert_horses.empty and len(front_runners) <= 2 and pace != "ハイペース（外の先行馬崩れ警戒）":
+            for _, row in alert_horses.iterrows():
+                gate = int(row['gate_num'])
+                horse_c = circle_nums.get(gate, f"({gate})")
+                reason_str = row.get('alert_reason', '')
+                # 普段は後ろにいる馬がしれっと逃げたケースなどへの警戒
+                alert_text += f"\n\n🚨大穴・逃げ警戒: {horse_c}は{reason_str}。前に行く馬の手薄な構成なら、ノーマークの単騎逃げで波乱を演出する可能性があります。"
 
     return f"**【{pace}予想】**\n{reason}{must_lead_text}{alert_text}"
 
+def generate_export_html(r_num, df_scored, formation_str, pace_text):
+    """結果を1枚のHTMLファイルとしてダウンロードできるように成形する"""
+    now_str = datetime.now().strftime("%Y-%m-%d")
+    
+    # DataFrameのHTML化 (一部不要列は除く)
+    display_cols = ['horse_name', 'gate_num', 'first_corner', 'first_3f_normalized', 'frame_type', 'running_style']
+    cols_to_show = [c for c in display_cols if c in df_scored.columns]
+    
+    df_html = df_scored[cols_to_show].to_html(
+        classes='table table-striped table-bordered', 
+        float_format='{:.1f}'.format,
+        index=False,
+        escape=False
+    )
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>南関競馬 展開予想 ({r_num}R)</title>
+        <style>
+            body {{ font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; line-height: 1.6; padding: 20px; color: #333; background: #fafafa; }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+            h1 {{ color: #2c3e50; font-size: 24px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+            h2 {{ color: #2980b9; font-size: 20px; margin-top: 30px; }}
+            .formation {{ background: #e8f4f8; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 18px; color: #0056b3; letter-spacing: 1px; }}
+            .pace-text {{ background: #fff3e0; padding: 20px; border-left: 5px solid #ff9800; border-radius: 4px; margin: 20px 0; }}
+            .table-container {{ overflow-x: auto; margin-top: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 14px; white-space: nowrap; }}
+            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background-color: #f2f2f2; position: sticky; top: 0; }}
+            .footer {{ margin-top: 40px; text-align: center; color: #7f8c8d; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🏇 南関競馬 展開予想レポート - {r_num}R</h1>
+            
+            <h2>🏃‍♂️ 想定されるレース隊列</h2>
+            <div class="formation">{formation_str}</div>
+            
+            <h2>展開解説とペース予想</h2>
+            <div class="pace-text">
+                {pace_text.replace(chr(10), '<br>')}
+            </div>
+            
+            <h2>各馬の詳細データ (直近最大10走)</h2>
+            <div class="table-container">
+                {df_html}
+            </div>
+            
+            <div class="footer">
+                出力日時: {now_str} (南関展開予想AI)
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html_content
 
 def main():
     st.set_page_config(page_title="南関競馬 展開予想AI", layout="wide", page_icon="🐎")
@@ -947,12 +1044,22 @@ def main():
                 
                 with st.expander(f"{r_num}R 各馬の詳細データ（直近最大10走・内中外枠区分等）"):
                     st.dataframe(df_scored, use_container_width=True)
+                
+                # ダウンロードボタンの追加
+                html_export = generate_export_html(r_num, df_scored, formation_str, pace_text)
+                st.download_button(
+                    label=f"💾 {r_num}R の予想を保存 (スマホ見返し用HTML)",
+                    data=html_export,
+                    file_name=f"南関展開予想_Race{r_num}.html",
+                    mime="text/html",
+                    key=f"dl_btn_{r_num}"
+                )
                     
                 if len(selected_races) > 1:
                     st.divider()
-                    time.sleep(1.5) # レース間のインターバル
+                    time.sleep(random.uniform(0.8, 1.5)) # レース間のインターバル
                     
-            st.success("全ての予想が完了しました！")
+            st.success("全ての予想・データ収集が完了しました！")
 
 if __name__ == "__main__":
     main()
