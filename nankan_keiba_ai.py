@@ -609,7 +609,7 @@ def run_prediction_for_race(_scraper, race_url, target_race_num=None):
     """1レース分のデータ収集と予想実行処理を関数化"""
     try:
         # 1. 今回のレース情報を取得（競馬場名・距離）
-        current_track, current_distance = scraper.get_race_info(race_url)
+        current_track, current_distance = _scraper.get_race_info(race_url)
         if pd.isna(current_distance) or not current_track:
             return None, "出馬表ページから距離または競馬場を検出できませんでした（対象レースが存在しないか、URL無効の可能性があります）。"
             
@@ -617,7 +617,7 @@ def run_prediction_for_race(_scraper, race_url, target_race_num=None):
         st.info(f"{header_text} | 基準前半3F: **{get_base_3f(current_track, current_distance):.1f}秒**")
         
         # 2. 出馬表から各馬のURLを取得
-        horses = scraper.get_horses_from_syutuba(race_url)
+        horses = _scraper.get_horses_from_syutuba(race_url)
         if not horses:
             return None, "出馬表から出走馬情報を取得できませんでした。"
             
@@ -630,7 +630,7 @@ def run_prediction_for_race(_scraper, race_url, target_race_num=None):
             horse_url = h["url"]
             
             time.sleep(0.3) # 負荷軽減
-            seiseki_df = scraper.get_horse_seiseki(horse_url)
+            seiseki_df = _scraper.get_horse_seiseki(horse_url)
             
             current_tosu = len(horses)
             stats_dict = aggregate_horse_stats(
@@ -1015,7 +1015,7 @@ def main():
                 
                 if error_msg:
                     st.error(error_msg)
-                    if len(target_races) > 1:
+                    if len(selected_races) > 1:
                         st.divider()
                         time.sleep(1)
                     continue
